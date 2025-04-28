@@ -317,41 +317,87 @@ if not df.empty:
             # Select relevant columns and drop rows where Site Name is missing
             heatmap_df_prep = filtered_df[heatmap_cols].dropna(subset=['Site Name']).copy()
 
-            # Ensure month columns are numeric before grouping, coerce errors
-            for col in heatmap_cols[1:]:
-                 heatmap_df_prep[col] = pd.to_numeric(heatmap_df_prep[col], errors='coerce')
+            # Explicitly ensure month columns are numeric and identify which ones are
+            numeric_cols_for_heatmap = []
+            for col in heatmap_cols[1:]: # Skip 'Site Name'
+                 if col in heatmap_df_prep.columns: # Check if column exists
+                     # Attempt conversion, store resulting column name if successful
+                     try:
+                         heatmap_df_prep[col] = pd.to_numeric(heatmap_df_prep[col], errors='coerce')
+                         # Check if dtype is now numeric after conversion
+                         if pd.api.types.is_numeric_dtype(heatmap_df_prep[col]):
+                              numeric_cols_for_heatmap.append(col)
+                         else:
+                             # Don't warn here yet, maybe it's okay if *some* columns are not numeric
+                             pass
+                     except Exception as e:
+                         st.warning(f"Error converting column '{col}' to numeric for heatmap: {e}")
 
-            # Handle potential duplicate Site Names by averaging usage for duplicates
-            # Group by Site Name (as string, handling NaNs) and calculate mean, reset index to keep Site Name as column
-            heatmap_df = heatmap_df_prep.groupby(heatmap_df_prep['Site Name'].astype(str).fillna('Unknown')).mean().reset_index()
-
-            # Drop rows where all month averages are NaN *after* grouping
-            heatmap_df.dropna(subset=heatmap_cols[1:], how='all', inplace=True)
-
-            if not heatmap_df.empty:
-                # Set Site Name as index for the heatmap *after* cleaning and aggregation
-                heatmap_df = heatmap_df.set_index('Site Name')
-                try:
-                    # Limit number of sites displayed if too many, to avoid browser freeze
-                    max_sites_heatmap = 50
-                    if len(heatmap_df) > max_sites_heatmap:
-                         st.info(f"Heatmap truncated to the top {max_sites_heatmap} sites by May average usage due to large number of sites.")
-                         # Sort by May usage and take top N (optional, or just take head)
-                         heatmap_df_display = heatmap_df.sort_values(by='May Avg (Mbps)', ascending=False).head(max_sites_heatmap)
-                    else:
-                         heatmap_df_display = heatmap_df
-
-                    fig_heatmap = px.imshow(heatmap_df_display,
-                                            text_auto=".1f", # Format text labels to 1 decimal place
-                                            aspect='auto',
-                                            color_continuous_scale='Blues', # Example color scale
-                                            title='Average Monthly Usage (Mbps) per Site (Filtered Data)',
-                                            labels={'color': 'Avg Mbps'}) # Label for the color bar
-                    st.plotly_chart(fig_heatmap, use_container_width=True)
-                except Exception as e:
-                    st.error(f"Error creating usage heatmap: {e}")
+            # Proceed only if we have valid numeric columns to aggregate
+            if not numeric_cols_for_heatmap:
+                 st.warning("No valid numeric monthly average columns found to aggregate for heatmap.")
             else:
-                st.info("No data available to display usage heatmap for the current selection after aggregation.")
+                # Handle potential duplicate Site Names by averaging usage for duplicates
+                # Group by Site Name (as string, handling NaNs)
+                # <<< FIX: Explicitly select ONLY the numeric columns for .mean() >>>
+                try:
+                    grouped = heatmap_df_prep.groupby(heatmap_df_prep['Site Name'].astype(str).fillna('Unknown'))
+                    # Select the numeric columns *before* applying mean
+                    heatmap_df = grouped[numeric_cols_for_heatmap].mean().reset_index()
+                    # <<< END FIX >>>
+
+                    # Drop rows where all selected month averages are NaN *after* grouping
+                    heatmap_df.dropna(subset=numeric_cols_for_heatmap, how='all', inplace=True)
+
+                    if not heatmap_df.empty:
+                        # Set Site Name as index for the heatmap *after* cleaning and aggregation
+                        # Check if 'Site Name' column exists after reset_index before setting index
+                        if 'Site Name' in heatmap_df.columns:
+                            heatmap_df = heatmap_df.set_index('Site Name')
+                        else:
+                             st.error("Critical error: 'Site Name' column lost during heatmap aggregation.")
+                             # Skip plotting if index cannot be set
+                             heatmap_df = pd.DataFrame() # Make it empty to skip plot
+
+                        if not heatmap_df.empty: # Check again after potential error above
+                            # Limit number of sites displayed if too many
+                            max_sites_heatmap = 50
+                            if len(heatmap_df) > max_sites_heatmap:
+                                st.info(f"Heatmap truncated to the top {max_sites_heatmap} sites (sorted by first available avg month) due to large number of sites.")
+                                # Sort by the first available numeric column and take top N (handle potential NaN)
+                                sort_col = numeric_cols_for_heatmap[0] # Use the first valid numeric col for sorting
+                                heatmap_df_display = heatmap_df.sort_values(by=sort_col, ascending=False, na_position='last').head(max_sites_heatmap)
+                            else:
+                                heatmap_df_display = heatmap_df
+
+                            # Check if display dataframe is empty after potential slicing/sorting
+                            if not heatmap_df_display.empty:
+                                fig_heatmap = px.imshow(heatmap_df_display,
+                                                        text_auto=".1f", # Format text labels to 1 decimal place
+                                                        aspect='auto',
+                                                        color_continuous_scale='Blues', # Example color scale
+                                                        title='Average Monthly Usage (Mbps) per Site (Filtered Data)',
+                                                        labels={'color': 'Avg Mbps'}) # Label for the color bar
+                                st.plotly_chart(fig_heatmap, use_container_width=True)
+                            else:
+                                st.info("No data remains for heatmap after processing and potential truncation.")
+                    else:
+                        st.info("No data available to display usage heatmap for the current selection after aggregation.")
+
+                except KeyError as ke:
+                     st.error(f"Error during heatmap data aggregation (KeyError): Column '{ke}' not found after grouping. Check data cleaning steps.")
+                     st.write("Columns available after grouping attempt:")
+                     try:
+                        st.dataframe(grouped.first().reset_index().columns.tolist()) # Show columns of grouped data
+                     except Exception:
+                        st.write("Could not retrieve columns from grouped data.")
+                except Exception as e:
+                    # Catch potential errors during groupby/mean
+                    st.error(f"Error during heatmap data aggregation: {e}")
+                    # Add debugging: show dtypes of the prep dataframe right before the error
+                    st.write("Data types just before error:")
+                    st.dataframe(heatmap_df_prep.dtypes.astype(str))
+
         else:
              missing_heatmap_cols = [col for col in heatmap_cols if col not in filtered_df.columns]
              st.warning(f"One or more required columns missing for Usage Heatmap. Missing: {missing_heatmap_cols}")
