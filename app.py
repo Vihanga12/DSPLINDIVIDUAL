@@ -1,4 +1,4 @@
-# --- START OF FILE app.py ---
+
 
 import streamlit as st
 import pandas as pd
@@ -45,8 +45,6 @@ def load_data():
         st.warning(f"Expected column '{currency_col}' not found. Skipping.")
 
     # --- Normalize column names globally ---
-    # Store original names before normalization for potential reference if needed
-    # original_columns = df.columns.tolist()
     try:
         # Remove problematic characters: *, (, ), \
         df.columns = df.columns.str.replace(r"[\\*()]", "", regex=True)
@@ -61,7 +59,6 @@ def load_data():
 
     except Exception as e:
         st.error(f"Error during column name normalization: {e}")
-        # Potentially return df with original columns or handle error differently
         return df # Return partially processed df
 
     return df
@@ -75,13 +72,16 @@ df = load_data()
 if df.empty:
     st.error("Data loading failed. Cannot proceed.")
 else:
-    # DEBUG: Show exact column names after normalization
-    st.sidebar.write("📋 Column Names After Normalization:", df.columns.tolist())
+    # DEBUG: Show exact column names after normalization (optional: keep or remove)
+    # st.sidebar.write("📋 Column Names After Normalization:", df.columns.tolist())
 
     # App title
     st.title("Sri Lanka Site Bandwidth Dashboard")
-    st.markdown("Click on the sections below to view the charts.")
+    st.markdown("Use the filters in the sidebar. Click on the sections below to view details.")
 
+    # --- Expander for Column Names ---
+    with st.expander("📋 View Column Names After Normalization"):
+        st.json(df.columns.tolist()) # st.json formats lists nicely
 
     # --- Sidebar Filters ---
     st.sidebar.header("Filter Options")
@@ -122,7 +122,6 @@ else:
 
 
     # --- KPIs ---
-    # Display KPIs directly as they are usually lightweight
     st.subheader("📊 Key Metrics")
     col1, col2, col3 = st.columns(3)
 
@@ -270,14 +269,13 @@ else:
                 st.warning(f"❗ Chart not generated — column(s) missing: {missing_cols}")
 
 
-        # -- Expander for Data Table --
-        with st.expander("📄 Filtered Data Preview"):
-            st.dataframe(filtered_df.head(100).fillna("N/A")) # Show preview, fill NaNs for display
-            st.caption(f"Displaying first 100 rows of {len(filtered_df)} total filtered rows.")
+        # --- Data Table (Not in Expander) ---
+        st.subheader("📄 Filtered Data Preview")
+        st.dataframe(filtered_df.head(100).fillna("N/A")) # Show preview, fill NaNs for display
+        st.caption(f"Displaying first 100 rows of {len(filtered_df)} total filtered rows.")
 
     else: # if filtered_df is empty
-         st.info("Select data using filters in the sidebar to view visualizations.")
+         st.info("Select data using filters in the sidebar to view visualizations and data preview.")
 
 # End: if not df.empty:
 
-# --- END OF FILE app.py ---
