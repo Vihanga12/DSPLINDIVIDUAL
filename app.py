@@ -6,413 +6,278 @@ import plotly.express as px
 
 # Load and clean data
 @st.cache_data
-def load_data(excel_file_path='/Users/vihanga/Downloads/DSPL_Individual_CW/preprocessed_data (76).xlsx'):
-    """
-    Loads data from the specified Excel file, cleans required columns,
-    and attempts to find and standardize the 'Criteria 3' column name.
-
-    Returns:
-        tuple: (pandas.DataFrame, str or None)
-               - The cleaned DataFrame.
-               - The final column name used for Criteria 3, or None if not found/processed.
-    """
+def load_data():
     try:
-        df = pd.read_excel(excel_file_path)
+        df = pd.read_excel("preprocessed_data (76).xlsx")
     except FileNotFoundError:
-        st.error(f"Error: File not found at '{excel_file_path}'. Make sure the file is in the same directory as app.py.")
-        return pd.DataFrame(), None # Return empty DataFrame and None for column name
+        st.error("Error: File not found at 'preprocessed_data (76).xlsx'. Make sure the file is in the same directory as app.py.")
+        return pd.DataFrame() # Return empty DataFrame on error
     except Exception as e:
         st.error(f"Error loading Excel file: {e}")
-        return pd.DataFrame(), None
+        return pd.DataFrame()
 
-    # --- Column Cleaning (Bandwidth) ---
+    # Clean numeric columns with units
     bandwidth_cols = [
-        'BW Allocated', 'May Avg (Mbps)', 'May Max (Mbps)',
-        'April Avg (Mbps)', 'April Max (Mbps)',
-        'March Avg (Mbps)', 'March Max (Mbps)'
+        "BW Allocated", "May Avg (Mbps)", "May Max (Mbps)",
+        "April Avg (Mbps)", "April Max (Mbps)",
+        "March Avg (Mbps)", "March Max (Mbps)"
     ]
     for col in bandwidth_cols:
         if col in df.columns:
-            # Convert to string first to handle potential non-string types before replace
-            df[col] = df[col].astype(str).str.replace(' Mbps', '', regex=False).str.strip()
-            # Use pd.to_numeric, errors='coerce' to handle non-convertible values
-            df[col] = pd.to_numeric(df[col], errors='coerce')
+            try:
+                # Attempt cleaning and conversion
+                df[col] = df[col].astype(str).str.replace(" Mbps", "", regex=False).str.strip()
+                df[col] = pd.to_numeric(df[col], errors='coerce') # Use coerce to handle errors gracefully
+            except Exception as e:
+                st.warning(f"Could not process column '{col}'. Error: {e}. Skipping cleaning.")
         else:
-            st.warning(f"Expected bandwidth column '{col}' not found in the Excel file.")
+            st.warning(f"Expected column '{col}' not found. Skipping.")
 
-    # --- Column Cleaning (Site Value) ---
-    site_value_col = 'Site Value (Rs.)****'
-    if site_value_col in df.columns:
-         # Convert to string first
-        df[site_value_col] = df[site_value_col].astype(str).str.replace(',', '', regex=False).str.strip()
-        df[site_value_col] = pd.to_numeric(df[site_value_col], errors='coerce')
+    # Clean currency column
+    currency_col = "Site Value (Rs.)****"
+    if currency_col in df.columns:
+        try:
+            df[currency_col] = df[currency_col].astype(str).str.replace(",", "", regex=False).str.strip()
+            df[currency_col] = pd.to_numeric(df[currency_col], errors='coerce')
+        except Exception as e:
+             st.warning(f"Could not process column '{currency_col}'. Error: {e}. Skipping cleaning.")
     else:
-        st.warning(f"Expected site value column '{site_value_col}' not found.")
+        st.warning(f"Expected column '{currency_col}' not found. Skipping.")
 
+    # --- Normalize column names globally ---
+    # Store original names before normalization for potential reference if needed
+    # original_columns = df.columns.tolist()
+    try:
+        # Remove problematic characters: *, (, ), \
+        df.columns = df.columns.str.replace(r"[\\*()]", "", regex=True)
+        # Replace multiple spaces with single space and strip leading/trailing whitespace
+        df.columns = df.columns.str.replace(r"\s+", " ", regex=True).str.strip()
+        # Specific rename for Site Value to make it cleaner if it exists
+        # Check for common variations after normalization
+        if "Site Value Rs." in df.columns:
+             df = df.rename(columns={"Site Value Rs.": "Site Value Rs"})
+        elif "Site Value Rs****" in df.columns: # Check if normalization missed this
+             df = df.rename(columns={"Site Value Rs****": "Site Value Rs"})
 
-    # --- Column Renaming and Criteria 3 Handling ---
-    potential_criteria_3_names = [
-        'Criteria 3 (BW Upgrade)***', 'Criteria 3 (BW Upgrade)**', 'Criteria 3 (BW Upgrade)*',
-        'Criteria 3 BW Upgrade***', 'Criteria 3 BW Upgrade'
-        # Add other potential variations from your actual Excel file here if needed
-    ]
-    target_criteria_1_name = 'Criteria 1 Max-C'
-    target_criteria_2_name = 'Criteria 2 Avg-C'
-    target_criteria_3_name = 'Criteria 3 BW Upgrade' # The desired clean name
+    except Exception as e:
+        st.error(f"Error during column name normalization: {e}")
+        # Potentially return df with original columns or handle error differently
+        return df # Return partially processed df
 
-    original_criteria_1_name = 'Criteria 1 (Max-C)*'
-    original_criteria_2_name = 'Criteria 2 (Avg-C)**'
+    return df
 
-    # Find the actual original name for Criteria 3
-    found_original_criteria_3_name = None
-    for potential_name in potential_criteria_3_names:
-        if potential_name in df.columns:
-            found_original_criteria_3_name = potential_name
-            break # Stop searching once found
-
-    # Build the rename mapping dynamically based on found columns
-    rename_mapping = {}
-    if original_criteria_1_name in df.columns:
-        rename_mapping[original_criteria_1_name] = target_criteria_1_name
-    else:
-         st.warning(f"Expected criteria column '{original_criteria_1_name}' not found.")
-
-    if original_criteria_2_name in df.columns:
-        rename_mapping[original_criteria_2_name] = target_criteria_2_name
-    else:
-        st.warning(f"Expected criteria column '{original_criteria_2_name}' not found.")
-
-    # Add Criteria 3 to mapping ONLY if its original name was found
-    if found_original_criteria_3_name:
-        rename_mapping[found_original_criteria_3_name] = target_criteria_3_name
-
-    # Apply all valid renames found
-    if rename_mapping:
-        df = df.rename(columns=rename_mapping)
-
-    # --- Determine the final Criteria 3 column name to use ---
-    final_criteria_3_col_name = None # Initialize
-    if target_criteria_3_name in df.columns: # Check if the target name exists (rename successful)
-        final_criteria_3_col_name = target_criteria_3_name
-    elif found_original_criteria_3_name and found_original_criteria_3_name in df.columns: # Check if original still exists (rename failed but original was found)
-        final_criteria_3_col_name = found_original_criteria_3_name
-        st.warning(f"Could not properly rename '{found_original_criteria_3_name}' to '{target_criteria_3_name}'. Using original name for plotting.")
-    elif not found_original_criteria_3_name: # If the original was never found in the first place
-        st.error(f"Could not find a column matching potential names for 'Criteria 3 BW Upgrade' (e.g., {potential_criteria_3_names[0]}). Please check the Excel file's column headers.")
-        # final_criteria_3_col_name remains None
-
-    return df, final_criteria_3_col_name # Return DataFrame and the name to use
-
+# Load dataset
+df = load_data()
 
 # --- Main App Logic ---
 
-# Load data and get the correct column name for Criteria 3
-df, criteria_3_col_name_for_plot = load_data('preprocessed_data (76).xlsx')
+# Exit if data loading failed
+if df.empty:
+    st.error("Data loading failed. Cannot proceed.")
+else:
+    # DEBUG: Show exact column names after normalization
+    st.sidebar.write("📋 Column Names After Normalization:", df.columns.tolist())
 
-# Only proceed if data loading was successful (DataFrame is not empty)
-if not df.empty:
+    # App title
+    st.title("Sri Lanka Site Bandwidth Dashboard")
+    st.markdown("Click on the sections below to view the charts.")
 
-    # Title and description
-    st.title('Sri Lanka Site Bandwidth Dashboard')
-    st.markdown('''
-    This dashboard analyzes site bandwidth allocation and usage across months (March, April, May).
-    Use the filters to explore performance by BW Group and individual sites.
-    ''')
 
-    # --- Sidebar filters ---
-    st.sidebar.header('Filter Options')
+    # --- Sidebar Filters ---
+    st.sidebar.header("Filter Options")
 
-    # BW Group Filter
-    bw_groups_options = []
-    if 'BW Group' in df.columns:
-        # Convert to string and handle potential NaN values before getting unique/sorting
-        bw_groups_options = sorted(df['BW Group'].astype(str).fillna('Unknown').unique())
+    # Use normalized names for filtering if they exist
+    bw_group_col = "BW Group"
+    site_name_col = "Site Name"
+
+    bw_groups = []
+    if bw_group_col in df.columns:
+        bw_groups = st.sidebar.multiselect(
+            "Select BW Groups",
+            options=sorted(df[bw_group_col].astype(str).fillna('Unknown').unique()),
+            default=sorted(df[bw_group_col].astype(str).fillna('Unknown').unique())
+        )
     else:
-        st.sidebar.warning("Column 'BW Group' not found for filtering.")
+        st.sidebar.warning(f"Column '{bw_group_col}' not found for filtering.")
 
-    bw_groups = st.sidebar.multiselect(
-        'Select Bandwidth Groups:', options=bw_groups_options, default=bw_groups_options
-    )
-
-    # Site Name Filter
-    sites_options = []
-    if 'Site Name' in df.columns:
-         # Convert to string and handle potential NaN values before getting unique/sorting
-         sites_options = sorted(df['Site Name'].astype(str).fillna('Unknown').unique())
+    sites = []
+    if site_name_col in df.columns:
+        sites = st.sidebar.multiselect(
+            "Select Sites",
+            options=sorted(df[site_name_col].astype(str).fillna('Unknown').unique()),
+            default=sorted(df[site_name_col].astype(str).fillna('Unknown').unique())
+        )
     else:
-        st.sidebar.warning("Column 'Site Name' not found for filtering.")
+         st.sidebar.warning(f"Column '{site_name_col}' not found for filtering.")
 
-    sites = st.sidebar.multiselect(
-        'Select Sites:', options=sites_options, default=sites_options
-    )
-
-    # --- Apply filters safely ---
+    # Apply filters
     filtered_df = df.copy()
-    if 'BW Group' in filtered_df.columns and bw_groups:
-        # Ensure filtering works even if filter list contains 'Unknown' from NaN handling
-        filtered_df = filtered_df[filtered_df['BW Group'].astype(str).fillna('Unknown').isin(bw_groups)]
-    if 'Site Name' in filtered_df.columns and sites:
-        # Ensure filtering works even if filter list contains 'Unknown' from NaN handling
-        filtered_df = filtered_df[filtered_df['Site Name'].astype(str).fillna('Unknown').isin(sites)]
+    if bw_group_col in filtered_df.columns and bw_groups:
+        filtered_df = filtered_df[filtered_df[bw_group_col].astype(str).fillna('Unknown').isin(bw_groups)]
+    if site_name_col in filtered_df.columns and sites:
+        filtered_df = filtered_df[filtered_df[site_name_col].astype(str).fillna('Unknown').isin(sites)]
 
-    # Display warning if filtering resulted in empty dataframe
     if filtered_df.empty and not df.empty:
          st.warning("No data matches the current filter selections.")
 
 
-    # --- Key Metrics ---
-    st.subheader('Key Metrics')
-    if not filtered_df.empty:
-        col1, col2, col3 = st.columns(3)
-        # Metric 1: Total Sites Selected
-        if 'Site Name' in filtered_df.columns:
-            col1.metric("Total Sites Selected", filtered_df['Site Name'].nunique())
-        else:
-            col1.metric("Total Sites Selected", "N/A")
+    # --- KPIs ---
+    # Display KPIs directly as they are usually lightweight
+    st.subheader("📊 Key Metrics")
+    col1, col2, col3 = st.columns(3)
 
-        # Metric 2: Average May Usage
+    # Use normalized names for KPIs
+    kpi_site_col = "Site Name"
+    kpi_may_avg_col = "May Avg Mbps"
+    kpi_bw_alloc_col = "BW Allocated"
+
+    if not filtered_df.empty:
+        if kpi_site_col in filtered_df.columns:
+            col1.metric("Total Sites", filtered_df[kpi_site_col].nunique())
+        else:
+             col1.metric("Total Sites", "N/A")
+
         avg_may_usage = None
-        if 'May Avg (Mbps)' in filtered_df.columns and not filtered_df['May Avg (Mbps)'].isnull().all():
-             avg_may_usage = filtered_df['May Avg (Mbps)'].mean()
-        col2.metric("Avg May Usage (Mbps)", f"{avg_may_usage:.2f}" if avg_may_usage is not None else "N/A")
+        if kpi_may_avg_col in filtered_df.columns and pd.api.types.is_numeric_dtype(filtered_df[kpi_may_avg_col]):
+             avg_may_usage = filtered_df[kpi_may_avg_col].mean()
+        col2.metric("Avg May Usage", f"{avg_may_usage:.2f} Mbps" if avg_may_usage is not None else "N/A")
 
-        # Metric 3: Average Allocated BW
         avg_allocated = None
-        if 'BW Allocated' in filtered_df.columns and not filtered_df['BW Allocated'].isnull().all():
-            avg_allocated = filtered_df['BW Allocated'].mean()
-        col3.metric("Avg Allocated BW (Mbps)", f"{avg_allocated:.2f}" if avg_allocated is not None else "N/A")
+        if kpi_bw_alloc_col in filtered_df.columns and pd.api.types.is_numeric_dtype(filtered_df[kpi_bw_alloc_col]):
+             avg_allocated = filtered_df[kpi_bw_alloc_col].mean()
+        col3.metric("Avg Allocated BW", f"{avg_allocated:.2f} Mbps" if avg_allocated is not None else "N/A")
     else:
-        # Display placeholder metrics if filtered_df is empty
-        col1, col2, col3 = st.columns(3)
-        col1.metric("Total Sites Selected", 0)
-        col2.metric("Avg May Usage (Mbps)", "N/A")
-        col3.metric("Avg Allocated BW (Mbps)", "N/A")
+        col1.metric("Total Sites", 0)
+        col2.metric("Avg May Usage", "N/A")
+        col3.metric("Avg Allocated BW", "N/A")
 
+    st.divider() # Add a visual separator
 
-    # --- Visualizations ---
+    # --- Visualizations (Inside Expanders) ---
+    st.header("Visualizations")
 
-    # Check if filtered_df is empty before attempting plots
     if not filtered_df.empty:
 
-        # -- Monthly Average Usage Bar Chart --
-        st.subheader('Average Bandwidth Usage per Month')
-        monthly_avg_cols = ['Site Name', 'March Avg (Mbps)', 'April Avg (Mbps)', 'May Avg (Mbps)']
-        if all(col in filtered_df.columns for col in monthly_avg_cols):
-            monthly_avg = filtered_df[monthly_avg_cols].copy()
-            monthly_avg.dropna(subset=monthly_avg_cols[1:], how='all', inplace=True) # Drop if all avg values are NaN
-            monthly_avg.dropna(subset=['Site Name'], inplace=True) # Drop if Site Name is NaN
+        # -- Expander for Bar Chart: Monthly Average Bandwidth --
+        with st.expander("📈 Monthly Avg Bandwidth Usage"):
+            # Use normalized names
+            monthly_cols = ["Site Name", "March Avg Mbps", "April Avg Mbps", "May Avg Mbps"]
+            if all(col in filtered_df.columns for col in monthly_cols):
+                monthly = filtered_df[monthly_cols].copy()
+                monthly.dropna(subset=monthly_cols[1:], how='all', inplace=True) # Drop if all avg values are NaN
+                monthly.dropna(subset=[monthly_cols[0]], inplace=True) # Drop if Site Name is NaN
 
-            if not monthly_avg.empty:
-                try:
-                    monthly_avg_melted = monthly_avg.melt(id_vars='Site Name', var_name='Month', value_name='Avg Mbps')
-                    # Ensure 'Avg Mbps' is numeric for plotting, coerce errors to NaN
-                    monthly_avg_melted['Avg Mbps'] = pd.to_numeric(monthly_avg_melted['Avg Mbps'], errors='coerce')
-                    monthly_avg_melted.dropna(subset=['Avg Mbps'], inplace=True) # Drop rows where conversion failed
+                if not monthly.empty:
+                    try:
+                        monthly_melted = monthly.melt(id_vars="Site Name", var_name="Month", value_name="Avg Mbps")
+                         # Ensure 'Avg Mbps' is numeric for plotting
+                        monthly_melted['Avg Mbps'] = pd.to_numeric(monthly_melted['Avg Mbps'], errors='coerce')
+                        monthly_melted.dropna(subset=['Avg Mbps'], inplace=True)
 
-                    if not monthly_avg_melted.empty:
-                        fig1 = px.bar(
-                            monthly_avg_melted, x='Site Name', y='Avg Mbps', color='Month',
-                            barmode='group', title='Monthly Average Bandwidth Usage per Site'
-                        )
-                        fig1.update_layout(xaxis_tickangle=-45)
-                        st.plotly_chart(fig1, use_container_width=True)
-                    else:
-                        st.info("No numeric average bandwidth data available to plot for the selected sites and months.")
-                except Exception as e:
-                    st.error(f"Error creating monthly usage chart: {e}")
+                        if not monthly_melted.empty:
+                            fig1 = px.bar(monthly_melted, x="Site Name", y="Avg Mbps", color="Month", barmode="group")
+                            fig1.update_layout(xaxis_tickangle=-45)
+                            st.plotly_chart(fig1, use_container_width=True)
+                        else:
+                            st.info("No numeric average bandwidth data to plot for the selected sites.")
+                    except Exception as e:
+                        st.error(f"Error creating monthly usage chart: {e}")
+                else:
+                     st.info("No data available for Monthly Average Usage plot after cleaning.")
             else:
-                st.info("No data available for Monthly Average Usage plot for the current selection after cleaning.")
-        else:
-            # Provide more specific feedback on missing columns
-            missing_monthly_cols = [col for col in monthly_avg_cols if col not in filtered_df.columns]
-            st.warning(f"One or more required columns missing for Monthly Average Usage plot. Missing: {missing_monthly_cols}")
+                missing_cols = [col for col in monthly_cols if col not in filtered_df.columns]
+                st.warning(f"❗ Chart not generated — column(s) missing: {missing_cols}")
 
 
-        # -- Criteria-based Scatter Plot --
-        st.subheader('Criteria Analysis')
-        if criteria_3_col_name_for_plot: # Check if Criteria 3 name was determined
-            scatter_cols = ['Criteria 1 Max-C', 'Criteria 2 Avg-C', criteria_3_col_name_for_plot, 'Site Name', 'BW Allocated']
-            if all(col in filtered_df.columns for col in scatter_cols):
-                # Drop rows where any of the essential plot columns are NaN
-                scatter_df = filtered_df.dropna(subset=['Criteria 1 Max-C', 'Criteria 2 Avg-C', criteria_3_col_name_for_plot]).copy()
-
+        # -- Expander for Scatter Plot: Criteria 1 vs 2 --
+        with st.expander("🎯 Criteria Analysis"):
+            # Use normalized names
+            scatter_req_cols = ["Criteria 1 Max-C", "Criteria 2 Avg-C", "Criteria 3 BW Upgrade"]
+            scatter_hover_cols = ["Site Name", "BW Allocated"] # Also check these hover columns
+            if all(col in filtered_df.columns for col in scatter_req_cols + scatter_hover_cols):
+                # Drop rows where essential cols are NaN
+                scatter_df = filtered_df.dropna(subset=scatter_req_cols).copy()
                 if not scatter_df.empty:
-                    # Convert color column to string for discrete coloring, handle potential mixed types safely
-                    scatter_df[criteria_3_col_name_for_plot] = scatter_df[criteria_3_col_name_for_plot].astype(str)
+                    # Ensure color column is string
+                    scatter_df["Criteria 3 BW Upgrade"] = scatter_df["Criteria 3 BW Upgrade"].astype(str)
                     try:
                         fig2 = px.scatter(
-                            scatter_df, x='Criteria 1 Max-C', y='Criteria 2 Avg-C', color=criteria_3_col_name_for_plot,
-                            hover_data=['Site Name', 'BW Allocated'], title=f'Criteria 1 vs Criteria 2 (Color: {criteria_3_col_name_for_plot})'
+                            scatter_df,
+                            x="Criteria 1 Max-C",
+                            y="Criteria 2 Avg-C",
+                            color="Criteria 3 BW Upgrade",
+                            hover_data=scatter_hover_cols,
+                            title="Criteria 1 vs 2 by BW Upgrade" # Title can be inside or outside plot func
                         )
                         st.plotly_chart(fig2, use_container_width=True)
                     except Exception as e:
-                        st.error(f"Error creating criteria scatter plot: {e}")
+                         st.error(f"Error creating criteria scatter plot: {e}")
                 else:
-                    st.info("No data available for Criteria Analysis scatter plot after filtering/cleaning.")
+                    st.info("No data available for Criteria Analysis plot after cleaning.")
             else:
-                # Provide more specific feedback on missing columns
-                missing_scatter_cols = [col for col in scatter_cols if col not in filtered_df.columns]
-                st.warning(f"One or more required columns missing for Criteria Analysis plot. Missing: {missing_scatter_cols}.")
-        else:
-            st.warning("Criteria 3 column could not be identified, skipping Criteria Analysis plot.")
+                missing_cols = [col for col in scatter_req_cols + scatter_hover_cols if col not in filtered_df.columns]
+                st.warning(f"❗ Chart not generated — column(s) missing: {missing_cols}")
 
 
-        # -- Site Value Box Plot --
-        st.subheader('Site Value Analysis')
-        site_value_col_plot = 'Site Value (Rs.)****' # Using the original name as defined in cleaning
-        box_plot_cols = ['BW Group', site_value_col_plot]
-        if all(col in filtered_df.columns for col in box_plot_cols):
-            # Drop rows where the value or group column is NaN
-            box_df = filtered_df.dropna(subset=[site_value_col_plot, 'BW Group']).copy()
-
-            if not box_df.empty:
-                # Convert BW Group to string to ensure discrete categories for the plot
-                box_df['BW Group'] = box_df['BW Group'].astype(str)
-                try:
-                    fig3 = px.box(
-                        box_df, x='BW Group', y=site_value_col_plot, title='Site Value Distribution across BW Groups'
-                    )
-                    st.plotly_chart(fig3, use_container_width=True)
-                except Exception as e:
-                    st.error(f"Error creating site value box plot: {e}")
+        # -- Expander for Box Plot: Site Value by BW Group --
+        with st.expander("💰 Site Value Distribution"):
+            # Use normalized names
+            box_plot_y_col = "Site Value Rs" # Adjusted name from normalization logic
+            box_plot_cols = ["BW Group", box_plot_y_col]
+            if all(col in filtered_df.columns for col in box_plot_cols):
+                box_df = filtered_df.dropna(subset=box_plot_cols).copy()
+                if not box_df.empty:
+                    # Ensure group is string
+                    box_df["BW Group"] = box_df["BW Group"].astype(str)
+                    try:
+                        fig3 = px.box(box_df, x="BW Group", y=box_plot_y_col, title="Site Value by BW Group")
+                        st.plotly_chart(fig3, use_container_width=True)
+                    except Exception as e:
+                        st.error(f"Error creating site value box plot: {e}")
+                else:
+                    st.info("No data available for Site Value box plot after cleaning.")
             else:
-                st.info("No data available for Site Value Analysis box plot after filtering/cleaning.")
-        else:
-             missing_box_cols = [col for col in box_plot_cols if col not in filtered_df.columns]
-             st.warning(f"One or more required columns missing for Site Value Analysis plot. Missing: {missing_box_cols}")
+                missing_cols = [col for col in box_plot_cols if col not in filtered_df.columns]
+                st.warning(f"❗ Chart not generated — column(s) missing: {missing_cols}")
 
 
-        # --- Chart 3: Pie Chart (BW Group Share) ---
-        st.subheader('Bandwidth Allocation Share by Group')
-        pie_chart_cols = ['BW Group', 'BW Allocated']
-        if all(col in filtered_df.columns for col in pie_chart_cols):
-            # Group by BW Group and sum BW Allocated, fill NaN with 0 before summing
-            # Ensure BW Group is treated as string for grouping and handle potential NaNs
-            bw_group_sum = filtered_df.fillna({'BW Allocated': 0}) \
-                                    .groupby(filtered_df['BW Group'].astype(str).fillna('Unknown'))['BW Allocated'] \
-                                    .sum().reset_index()
-            # Filter out groups with 0 or negative allocation for a cleaner pie chart
-            bw_group_sum = bw_group_sum[bw_group_sum['BW Allocated'] > 0]
+        # -- Expander for Pie Chart (BW Group Share) --
+        with st.expander("🍰 Bandwidth Allocation Share by Group"):
+            # Use normalized names
+            pie_chart_cols = ['BW Group', 'BW Allocated']
+            if all(col in filtered_df.columns for col in pie_chart_cols):
+                # Group by BW Group and sum BW Allocated, fill NaN with 0 before summing
+                # Ensure BW Group is treated as string for grouping and handle potential NaNs
+                bw_group_sum = filtered_df.fillna({'BW Allocated': 0}) \
+                                        .groupby(filtered_df['BW Group'].astype(str).fillna('Unknown'))['BW Allocated'] \
+                                        .sum().reset_index()
+                # Filter out groups with 0 or negative allocation for a cleaner pie chart
+                bw_group_sum = bw_group_sum[bw_group_sum['BW Allocated'] > 0]
 
-            if not bw_group_sum.empty:
-                try:
-                    fig_pie = px.pie(bw_group_sum, names='BW Group', values='BW Allocated',
-                                     title='Total Allocated BW by Group (Filtered Data)',
-                                     hole=0.3) # Optional: makes it a donut chart
-                    fig_pie.update_traces(textposition='inside', textinfo='percent+label', sort=False) # Keep original order if desired
-                    st.plotly_chart(fig_pie, use_container_width=True)
-                except Exception as e:
-                    st.error(f"Error creating bandwidth allocation pie chart: {e}")
+                if not bw_group_sum.empty:
+                    try:
+                        fig_pie = px.pie(bw_group_sum, names='BW Group', values='BW Allocated',
+                                         title='Total Allocated BW by Group (Filtered Data)',
+                                         hole=0.3) # Optional: makes it a donut chart
+                        fig_pie.update_traces(textposition='inside', textinfo='percent+label', sort=False)
+                        st.plotly_chart(fig_pie, use_container_width=True)
+                    except Exception as e:
+                        st.error(f"Error creating bandwidth allocation pie chart: {e}")
+                else:
+                    st.info("No positive allocated bandwidth data found for the selected groups to display in pie chart.")
             else:
-                st.info("No positive allocated bandwidth data found for the selected groups to display in pie chart.")
-        else:
-            missing_pie_cols = [col for col in pie_chart_cols if col not in filtered_df.columns]
-            st.warning(f"One or more required columns missing for Bandwidth Allocation Pie Chart. Missing: {missing_pie_cols}")
+                missing_cols = [col for col in pie_chart_cols if col not in filtered_df.columns]
+                st.warning(f"❗ Chart not generated — column(s) missing: {missing_cols}")
 
 
-        # --- Chart 4: Heatmap (Usage Across Sites and Months) ---
-        st.subheader('Monthly Average Usage Heatmap')
-        heatmap_cols = ['Site Name', 'March Avg (Mbps)', 'April Avg (Mbps)', 'May Avg (Mbps)']
-        if all(col in filtered_df.columns for col in heatmap_cols):
-            # Select relevant columns and drop rows where Site Name is missing
-            heatmap_df_prep = filtered_df[heatmap_cols].dropna(subset=['Site Name']).copy()
+        # -- Expander for Data Table --
+        with st.expander("📄 Filtered Data Preview"):
+            st.dataframe(filtered_df.head(100).fillna("N/A")) # Show preview, fill NaNs for display
+            st.caption(f"Displaying first 100 rows of {len(filtered_df)} total filtered rows.")
 
-            # Explicitly ensure month columns are numeric and identify which ones are
-            numeric_cols_for_heatmap = []
-            for col in heatmap_cols[1:]: # Skip 'Site Name'
-                 if col in heatmap_df_prep.columns: # Check if column exists
-                     # Attempt conversion, store resulting column name if successful
-                     try:
-                         heatmap_df_prep[col] = pd.to_numeric(heatmap_df_prep[col], errors='coerce')
-                         # Check if dtype is now numeric after conversion
-                         if pd.api.types.is_numeric_dtype(heatmap_df_prep[col]):
-                              numeric_cols_for_heatmap.append(col)
-                         else:
-                             # Don't warn here yet, maybe it's okay if *some* columns are not numeric
-                             pass
-                     except Exception as e:
-                         st.warning(f"Error converting column '{col}' to numeric for heatmap: {e}")
+    else: # if filtered_df is empty
+         st.info("Select data using filters in the sidebar to view visualizations.")
 
-            # Proceed only if we have valid numeric columns to aggregate
-            if not numeric_cols_for_heatmap:
-                 st.warning("No valid numeric monthly average columns found to aggregate for heatmap.")
-            else:
-                # Handle potential duplicate Site Names by averaging usage for duplicates
-                # Group by Site Name (as string, handling NaNs)
-                # <<< FIX: Explicitly select ONLY the numeric columns for .mean() >>>
-                try:
-                    grouped = heatmap_df_prep.groupby(heatmap_df_prep['Site Name'].astype(str).fillna('Unknown'))
-                    # Select the numeric columns *before* applying mean
-                    heatmap_df = grouped[numeric_cols_for_heatmap].mean().reset_index()
-                    # <<< END FIX >>>
-
-                    # Drop rows where all selected month averages are NaN *after* grouping
-                    heatmap_df.dropna(subset=numeric_cols_for_heatmap, how='all', inplace=True)
-
-                    if not heatmap_df.empty:
-                        # Set Site Name as index for the heatmap *after* cleaning and aggregation
-                        # Check if 'Site Name' column exists after reset_index before setting index
-                        if 'Site Name' in heatmap_df.columns:
-                            heatmap_df = heatmap_df.set_index('Site Name')
-                        else:
-                             st.error("Critical error: 'Site Name' column lost during heatmap aggregation.")
-                             # Skip plotting if index cannot be set
-                             heatmap_df = pd.DataFrame() # Make it empty to skip plot
-
-                        if not heatmap_df.empty: # Check again after potential error above
-                            # Limit number of sites displayed if too many
-                            max_sites_heatmap = 50
-                            if len(heatmap_df) > max_sites_heatmap:
-                                st.info(f"Heatmap truncated to the top {max_sites_heatmap} sites (sorted by first available avg month) due to large number of sites.")
-                                # Sort by the first available numeric column and take top N (handle potential NaN)
-                                sort_col = numeric_cols_for_heatmap[0] # Use the first valid numeric col for sorting
-                                heatmap_df_display = heatmap_df.sort_values(by=sort_col, ascending=False, na_position='last').head(max_sites_heatmap)
-                            else:
-                                heatmap_df_display = heatmap_df
-
-                            # Check if display dataframe is empty after potential slicing/sorting
-                            if not heatmap_df_display.empty:
-                                fig_heatmap = px.imshow(heatmap_df_display,
-                                                        text_auto=".1f", # Format text labels to 1 decimal place
-                                                        aspect='auto',
-                                                        color_continuous_scale='Blues', # Example color scale
-                                                        title='Average Monthly Usage (Mbps) per Site (Filtered Data)',
-                                                        labels={'color': 'Avg Mbps'}) # Label for the color bar
-                                st.plotly_chart(fig_heatmap, use_container_width=True)
-                            else:
-                                st.info("No data remains for heatmap after processing and potential truncation.")
-                    else:
-                        st.info("No data available to display usage heatmap for the current selection after aggregation.")
-
-                except KeyError as ke:
-                     st.error(f"Error during heatmap data aggregation (KeyError): Column '{ke}' not found after grouping. Check data cleaning steps.")
-                     st.write("Columns available after grouping attempt:")
-                     try:
-                        st.dataframe(grouped.first().reset_index().columns.tolist()) # Show columns of grouped data
-                     except Exception:
-                        st.write("Could not retrieve columns from grouped data.")
-                except Exception as e:
-                    # Catch potential errors during groupby/mean
-                    st.error(f"Error during heatmap data aggregation: {e}")
-                    # Add debugging: show dtypes of the prep dataframe right before the error
-                    st.write("Data types just before error:")
-                    st.dataframe(heatmap_df_prep.dtypes.astype(str))
-
-        else:
-             missing_heatmap_cols = [col for col in heatmap_cols if col not in filtered_df.columns]
-             st.warning(f"One or more required columns missing for Usage Heatmap. Missing: {missing_heatmap_cols}")
-
-
-        # --- Dataframe view ---
-        st.subheader('Filtered Data Preview')
-        # Display the head of the filtered dataframe, handling potential NaNs gracefully for display
-        st.dataframe(filtered_df.head(100).fillna('N/A'))
-        st.caption(f"Displaying first 100 rows of {len(filtered_df)} total filtered rows.")
-
-    # End of check for `if not filtered_df.empty:` for plots
-
-elif df is None: # Check if load_data returned None explicitly due to load error
-    st.error("Application cannot start because data loading failed. Please check terminal or previous error messages for details.")
-# If df is empty but not None, the error was shown in load_data or the filter warning was shown.
+# End: if not df.empty:
 
 # --- END OF FILE app.py ---
