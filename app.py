@@ -4,6 +4,30 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 
+# --- CSS Injection for Tag Color ---
+# Note: This relies on Streamlit's internal structure, which might change in future versions.
+st.markdown("""
+<style>
+    /* Target the background and text color of the tag */
+    .stMultiSelect [data-baseweb="tag"] {
+        background-color: #ADFF2F; /* Luminous Green (GreenYellow Hex Code) */
+        color: black !important; /* Set text color to black */
+        border: 1px solid #9ACD32; /* Optional: Add a slightly darker border */
+    }
+    /* Change the background color on hover */
+    .stMultiSelect [data-baseweb="tag"]:hover {
+        background-color: #9ACD32; /* Slightly darker green (YellowGreen) on hover */
+        border-color: #6B8E23; /* Even darker border on hover */
+    }
+    /* Change the 'x' (remove icon) color to black */
+    .stMultiSelect [data-baseweb="tag"] span[role="button"] svg {
+        fill: black !important;
+    }
+</style>
+""", unsafe_allow_html=True)
+# --- End CSS Injection ---
+
+
 # Load and clean data
 @st.cache_data
 def load_data():
