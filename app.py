@@ -210,41 +210,19 @@ else:
                         except Exception as e:
                             st.error(f"Error creating pie chart: {e}")
 
+            # --- New Visualization: Average Usage vs Allocated Bandwidth Bar Chart ---
+            with st.expander("📊 Average Usage vs Allocated Bandwidth", expanded=True):
+                if all(col in filtered_df.columns for col in [bw_alloc_col, may_avg_col]):
+                    bar_df = filtered_df.dropna(subset=[bw_alloc_col, may_avg_col]).copy()
+                    if not bar_df.empty:
+                        try:
+                            fig4 = px.bar(bar_df, x=site_name_col, y=[bw_alloc_col, may_avg_col], barmode="group", title="Average Usage vs Allocated Bandwidth")
+                            fig4.update_layout(xaxis_tickangle=-45)
+                            st.plotly_chart(fig4, use_container_width=True)
+                        except Exception as e:
+                            st.error(f"Error creating Average Usage vs Allocated Bandwidth bar chart: {e}")
+
         st.subheader("📄 Filtered Data Preview")
         if not filtered_df.empty:
             st.dataframe(filtered_df.head(100).fillna("N/A"), use_container_width=True)
             st.caption(f"Displaying first 100 rows of {len(filtered_df):,} total filtered rows.")
-
-    # --- Raw Data View ---
-    elif page_selection == "Raw Data View":
-        st.header("📄 Raw Data Table")
-
-        st.markdown("---")  # Horizontal rule
-
-        st.subheader("About This Dashboard")
-        st.markdown("""
-        **Dashboard Title:** Sri Lanka Site Bandwidth Dashboard
-
-        **Main Purpose:**  
-        To provide an interactive platform for analyzing telecommunication site bandwidth allocation, usage patterns (across recent months), and site value metrics across different regions or groups in Sri Lanka.  
-        It helps identify potential areas for optimization, upgrades, or cost assessment based on usage and predefined criteria.
-
-        **Target Users:**  
-        Network planners, capacity managers, operations teams, and financial analysts involved in managing and optimizing the telecommunications infrastructure and budget.
-
-        **Dashboard Sections (Available in 'Dashboard' View):**
-        - **Key Metrics:** High-level overview of total sites, average usage, and average allocation.
-        - **Filters:** Options to slice data by BW Group and specific Sites.
-        - **Visualizations:**
-            - Monthly Average Bandwidth Usage per Site.
-            - Criteria Analysis (Scatter plot based on performance metrics).
-            - Site Value Distribution by Bandwidth Group.
-            - Bandwidth Allocation Share by Group (Pie Chart).
-        - **Filtered Data Preview:** A table showing the data rows corresponding to the active filters.
-        """)
-
-        st.markdown("---")  # Horizontal rule
-
-        st.markdown("Below is the complete dataset after initial loading and cleaning steps:")
-        st.dataframe(df_raw.fillna("N/A"), use_container_width=True)
-        st.caption(f"Displaying all {len(df_raw):,} rows.")
